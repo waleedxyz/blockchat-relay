@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { ethers } from 'ethers';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 
@@ -18,12 +19,18 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const uploadsDir = path.join(__dirname, 'uploads');
+// Ensure uploads directory exists (Railway ephemeral fs still needs the dir present)
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+app.use('/uploads', express.static(uploadsDir));
 
 // File upload configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -86,7 +93,8 @@ app.post('/upload', upload.single('file'), (req, res) => {
 });
 
 // Start HTTP server
-const server = app.listen(PORT, () => {
+// Bind to 0.0.0.0 which is required on some PaaS (like Railway)
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 BlockChat Relay Server running on port ${PORT}`);
   console.log(`📁 Upload endpoint: http://localhost:${PORT}/upload`);
   console.log(`🔌 WebSocket ready for connections`);
@@ -296,17 +304,24 @@ setInterval(() => {
 }, 30000); // Every 30 seconds
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, closing server...');
-  
+function gracefulShutdown(signal) {
+  console.log(`🛑 ${signal} received, closing server...`);
+
+  // Close all client sockets
   clients.forEach((ws) => {
-    ws.close();
+    try { ws.close(); } catch (e) { /* ignore */ }
   });
-  
+
+  // Close WebSocket server (stop accepting new upgrades)
+  try { wss.close(); } catch (e) { /* ignore */ }
+
   server.close(() => {
     console.log('✅ Server closed');
     process.exit(0);
   });
-});
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 console.log('✅ Relay server initialized');
