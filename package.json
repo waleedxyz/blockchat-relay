@@ -1,4 +1,5 @@
-"name": "blockchat-relay",
+{
+  "name": "blockchat-relay",
   "version": "1.0.0",
   "type": "module",
   "description": "WebSocket relay server for BlockChat with wallet-based routing",
